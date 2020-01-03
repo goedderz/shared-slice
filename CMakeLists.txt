@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(velocypack)
+add_subdirectory(googletest)
 
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 
@@ -19,6 +20,20 @@ include_directories(shared_slice src)
 target_link_libraries(shared_slice velocypack)
 
 target_compile_options(shared_slice PRIVATE "-fsanitize=address")
+target_link_libraries(shared_slice asan)
 target_compile_options(shared_slice PRIVATE "-fsanitize=undefined")
 target_link_libraries(shared_slice ubsan)
 
+add_executable(tests
+  tests/tests.cpp
+  tests/cases/SharedSliceTest.cpp)
+
+include_directories(tests tests)
+
+target_link_libraries(tests gtest)
+target_link_libraries(tests shared_slice)
+
+target_compile_options(tests PRIVATE "-fsanitize=address")
+target_link_libraries(tests asan)
+target_compile_options(tests PRIVATE "-fsanitize=undefined")
+target_link_libraries(tests ubsan)
