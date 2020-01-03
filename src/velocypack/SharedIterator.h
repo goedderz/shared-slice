@@ -23,7 +23,7 @@
 #ifndef SRC_SHAREDITERATOR_H
 #define SRC_SHAREDITERATOR_H
 
-#include "SharedSlice.h"
+#include "velocypack/SharedSlice.h"
 
 #include <velocypack/Iterator.h>
 
