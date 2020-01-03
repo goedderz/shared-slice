@@ -10,7 +10,7 @@ add_subdirectory(velocypack)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 
 add_library(shared_slice
-  src/SharedSlice.cpp src/SharedSlice.h)
+  src/SharedSlice.cpp src/SharedSlice.h src/SharedIterator.cpp src/SharedIterator.h)
 
 target_link_libraries(shared_slice velocypack)
 

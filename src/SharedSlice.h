@@ -47,6 +47,8 @@ namespace arangodb::velocypack {
  * The rest could be called by using slice().[method], too. Or we could even
  * add operator->, so sharedSlice->[method] will always call the method on the
  * slice.
+ *
+ * Should we pass template arguments to shared_ptr, i.e. Deleter and Allocator?
  */
 
 class SharedSlice {
