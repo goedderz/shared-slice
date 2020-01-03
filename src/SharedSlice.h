@@ -31,21 +31,298 @@
 namespace arangodb::velocypack {
 
 /*
- * TODO The main design question is: what's the underlying type? e.g.
+ * TODO Design questions:
+ *
+ * What's the underlying type? e.g.
  * std::shared_ptr<uint8_t const> or
  * std::shared_ptr<Buffer<uint8_t>> or
  * std::shared_ptr<Slice>
  * or something else?
+ *
+ * Which methods should return shared_ptr aside from the ones returning Slices?
+ * e.g. getExternal(), getString() etc.
+ *
+ * Should really everything be delegated, or only those methods returning
+ * a SharedSlice / shared_ptr?
+ * The rest could be called by using slice().[method], too. Or we could even
+ * add operator->, so sharedSlice->[method] will always call the method on the
+ * slice.
  */
 
 class SharedSlice {
  public:
-  explicit SharedSlice(std::shared_ptr<uint8_t const>&& slice);
-  explicit SharedSlice(std::shared_ptr<uint8_t const> const& slice);
-  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t const> const>&& buffer);
-  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t const> const> const& buffer);
+  explicit SharedSlice(std::shared_ptr<uint8_t const>&& slice) noexcept;
+  explicit SharedSlice(std::shared_ptr<uint8_t const> const& slice) noexcept;
+  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t const> const>&& buffer) noexcept;
+  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t const> const> const& buffer) noexcept;
+
+  // Aliasing constructor
+  explicit SharedSlice(SharedSlice&& sharedPtr, Slice slice) noexcept;
+  explicit SharedSlice(SharedSlice const& sharedPtr, Slice slice) noexcept;
 
   [[nodiscard]] Slice slice() const noexcept;
+
+  /**************************************
+   * Everything else delegates to Slice
+   **************************************/
+
+  static constexpr auto defaultSeed = Slice::defaultSeed;
+  static constexpr auto defaultSeed32 = Slice::defaultSeed32;
+  static constexpr auto defaultSeed64 = Slice::defaultSeed64;
+
+  [[nodiscard]] SharedSlice value() const noexcept;
+
+  [[nodiscard]] uint64_t getFirstTag() const;
+
+  [[nodiscard]] std::vector<uint64_t> getTags() const;
+
+  [[nodiscard]] bool hasTag(uint64_t tagId) const;
+
+  [[nodiscard]] uint8_t const* valueStart() const noexcept;
+
+  [[nodiscard]] uint8_t const* start() const noexcept;
+
+  template <typename T>
+  [[nodiscard]] T const* startAs() const {
+    return slice().startAs<T>();
+  }
+
+  [[nodiscard]] uint8_t head() const noexcept;
+
+  [[nodiscard]] uint8_t const* begin() noexcept;
+
+  [[nodiscard]] uint8_t const* begin() const noexcept;
+
+  [[nodiscard]] uint8_t const* end() const;
+
+  [[nodiscard]] ValueType type() const noexcept;
+
+  [[nodiscard]] char const* typeName() const;
+
+  // I didn't implement set(), it seems to fragile here.
+  // void set(uint8_t const* s);
+
+  [[nodiscard]] uint64_t hash(uint64_t seed = defaultSeed64) const;
+
+  [[nodiscard]] uint32_t hash32(uint32_t seed = defaultSeed32) const;
+
+  [[nodiscard]] uint64_t hashSlow(uint64_t seed = defaultSeed64) const;
+
+  [[nodiscard]] uint64_t normalizedHash(uint64_t seed = defaultSeed64) const;
+
+  [[nodiscard]] uint32_t normalizedHash32(uint32_t seed = defaultSeed32) const;
+
+  [[nodiscard]] uint64_t hashString(uint64_t seed = defaultSeed64) const noexcept;
+
+  [[nodiscard]] uint32_t hashString32(uint32_t seed = defaultSeed32) const noexcept;
+
+  [[nodiscard]] bool isType(ValueType t) const;
+
+  [[nodiscard]] bool isNone() const noexcept;
+
+  [[nodiscard]] bool isIllegal() const noexcept;
+
+  [[nodiscard]] bool isNull() const noexcept;
+
+  [[nodiscard]] bool isBool() const noexcept;
+
+  [[nodiscard]] bool isBoolean() const noexcept;
+
+  [[nodiscard]] bool isTrue() const noexcept;
+
+  [[nodiscard]] bool isFalse() const noexcept;
+
+  [[nodiscard]] bool isArray() const noexcept;
+
+  [[nodiscard]] bool isObject() const noexcept;
+
+  [[nodiscard]] bool isDouble() const noexcept;
+
+  [[nodiscard]] bool isUTCDate() const noexcept;
+
+  [[nodiscard]] bool isExternal() const noexcept;
+
+  [[nodiscard]] bool isMinKey() const noexcept;
+
+  [[nodiscard]] bool isMaxKey() const noexcept;
+
+  [[nodiscard]] bool isInt() const noexcept;
+
+  [[nodiscard]] bool isUInt() const noexcept;
+
+  [[nodiscard]] bool isSmallInt() const noexcept;
+
+  [[nodiscard]] bool isString() const noexcept;
+
+  [[nodiscard]] bool isBinary() const noexcept;
+
+  [[nodiscard]] bool isBCD() const noexcept;
+
+  [[nodiscard]] bool isCustom() const noexcept;
+
+  [[nodiscard]] bool isTagged() const noexcept;
+
+  [[nodiscard]] bool isInteger() const noexcept;
+
+  [[nodiscard]] bool isNumber() const noexcept;
+
+  template <typename T>
+  [[nodiscard]] bool isNumber() const noexcept {
+    return slice().isNumber<T>();
+  }
+
+  [[nodiscard]] bool isSorted() const noexcept;
+
+  [[nodiscard]] bool getBool() const;
+
+  [[nodiscard]] bool getBoolean() const;
+
+  [[nodiscard]] double getDouble() const;
+
+  [[nodiscard]] SharedSlice at(ValueLength index) const;
+
+  [[nodiscard]] SharedSlice operator[](ValueLength index) const;
+
+  [[nodiscard]] ValueLength length() const;
+
+  [[nodiscard]] SharedSlice keyAt(ValueLength index, bool translate = true) const;
+
+  [[nodiscard]] SharedSlice valueAt(ValueLength index) const;
+
+  [[nodiscard]] SharedSlice getNthValue(ValueLength index) const;
+
+  template <typename T>
+  [[nodiscard]] SharedSlice get(std::vector<T> const& attributes, bool resolveExternals = false) const {
+    return slice().get(attributes, resolveExternals);
+  }
+
+  [[nodiscard]] SharedSlice get(StringRef const& attribute) const;
+
+  [[nodiscard]] SharedSlice get(std::string const& attribute) const;
+
+  [[nodiscard]] SharedSlice get(char const* attribute) const;
+
+  [[nodiscard]] SharedSlice get(char const* attribute, std::size_t length) const;
+
+  [[nodiscard]] SharedSlice operator[](StringRef const& attribute) const;
+
+  [[nodiscard]] SharedSlice operator[](std::string const& attribute) const;
+
+  [[nodiscard]] bool hasKey(StringRef const& attribute) const;
+
+  [[nodiscard]] bool hasKey(std::string const& attribute) const;
+
+  [[nodiscard]] bool hasKey(char const* attribute) const;
+
+  [[nodiscard]] bool hasKey(char const* attribute, std::size_t length) const;
+
+  [[nodiscard]] bool hasKey(std::vector<std::string> const& attributes) const;
+
+  [[nodiscard]] std::shared_ptr<char const> getExternal() const;
+
+  [[nodiscard]] SharedSlice resolveExternal() const;
+
+  [[nodiscard]] SharedSlice resolveExternals() const;
+
+  [[nodiscard]] bool isEmptyArray() const;
+
+  [[nodiscard]] bool isEmptyObject() const;
+
+  [[nodiscard]] SharedSlice translate() const;
+
+  [[nodiscard]] int64_t getInt() const;
+
+  [[nodiscard]] uint64_t getUInt() const;
+
+  [[nodiscard]] int64_t getSmallInt() const;
+
+  template <typename T>
+  [[nodiscard]] T getNumber() const {
+    return slice().getNumber<T>();
+  }
+
+  template <typename T>
+  [[nodiscard]] T getNumericValue() const {
+    return slice().getNumericValue<T>();
+  }
+
+  [[nodiscard]] int64_t getUTCDate() const;
+
+  [[nodiscard]] std::shared_ptr<char const> getString(ValueLength& length) const;
+
+  [[nodiscard]] std::shared_ptr<char const> getStringUnchecked(ValueLength& length) const noexcept;
+
+  [[nodiscard]] ValueLength getStringLength() const;
+
+  [[nodiscard]] std::string copyString() const;
+
+  [[nodiscard]] StringRef stringRef() const;
+#ifdef VELOCYPACK_HAS_STRING_VIEW
+  [[nodiscard]] std::string_view stringView() const;
+#endif
+
+  [[nodiscard]] std::shared_ptr<uint8_t const> getBinary(ValueLength& length) const;
+
+  [[nodiscard]] ValueLength getBinaryLength() const;
+
+  [[nodiscard]] std::vector<uint8_t> copyBinary() const;
+
+  [[nodiscard]] ValueLength byteSize() const;
+
+  [[nodiscard]] ValueLength valueByteSize() const;
+
+  [[nodiscard]] ValueLength findDataOffset(uint8_t head) const noexcept;
+
+  [[nodiscard]] ValueLength getNthOffset(ValueLength index) const;
+
+  [[nodiscard]] SharedSlice makeKey() const;
+
+  [[nodiscard]] int compareString(StringRef const& value) const;
+
+  [[nodiscard]] int compareString(std::string const& value) const;
+
+  [[nodiscard]] int compareString(char const* value, std::size_t length) const;
+
+  [[nodiscard]] int compareStringUnchecked(StringRef const& value) const noexcept;
+
+  [[nodiscard]] int compareStringUnchecked(std::string const& value) const noexcept;
+
+  [[nodiscard]] int compareStringUnchecked(char const* value, std::size_t length) const noexcept;
+
+  [[nodiscard]] bool isEqualString(StringRef const& attribute) const;
+
+  [[nodiscard]] bool isEqualString(std::string const& attribute) const;
+
+  [[nodiscard]] bool isEqualStringUnchecked(StringRef const& attribute) const noexcept;
+
+  [[nodiscard]] bool isEqualStringUnchecked(std::string const& attribute) const noexcept;
+
+  [[nodiscard]] bool binaryEquals(SharedSlice const& other) const;
+
+  bool operator==(SharedSlice const& other) const = delete;
+  bool operator!=(SharedSlice const& other) const = delete;
+
+  [[nodiscard]] std::string toHex() const;
+  [[nodiscard]] std::string toJson(Options const* options = &Options::Defaults) const;
+  [[nodiscard]] std::string toString(Options const* options = &Options::Defaults) const;
+  [[nodiscard]] std::string hexType() const;
+
+  [[nodiscard]] int64_t getIntUnchecked() const noexcept;
+
+  [[nodiscard]] uint64_t getUIntUnchecked() const noexcept;
+
+  [[nodiscard]] int64_t getSmallIntUnchecked() const noexcept;
+
+  [[nodiscard]] std::shared_ptr<uint8_t const> getBCD(int8_t& sign, int32_t& exponent,
+                                        ValueLength& mantissaLength) const;
+
+ private:
+  [[nodiscard]] SharedSlice alias(Slice slice) const noexcept;
+
+  template <typename T>
+  [[nodiscard]] std::shared_ptr<T> aliasT(T* t) const noexcept {
+    return std::shared_ptr<T>(_start, t);
+  }
 
  private:
   std::shared_ptr<uint8_t const> _start;
