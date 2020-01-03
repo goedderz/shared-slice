@@ -53,10 +53,10 @@ namespace arangodb::velocypack {
 
 class SharedSlice {
  public:
-  explicit SharedSlice(std::shared_ptr<uint8_t const>&& slice) noexcept;
-  explicit SharedSlice(std::shared_ptr<uint8_t const> const& slice) noexcept;
-  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t const> const>&& buffer) noexcept;
-  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t const> const> const& buffer) noexcept;
+  explicit SharedSlice(std::shared_ptr<uint8_t const>&& data) noexcept;
+  explicit SharedSlice(std::shared_ptr<uint8_t const> const& data) noexcept;
+  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t> const>&& buffer) noexcept;
+  explicit SharedSlice(std::shared_ptr<Buffer<uint8_t> const> const& buffer) noexcept;
 
   // Aliasing constructor
   explicit SharedSlice(SharedSlice&& sharedPtr, Slice slice) noexcept;
@@ -80,22 +80,20 @@ class SharedSlice {
 
   [[nodiscard]] bool hasTag(uint64_t tagId) const;
 
-  [[nodiscard]] uint8_t const* valueStart() const noexcept;
+  [[nodiscard]] std::shared_ptr<uint8_t const> valueStart() const noexcept;
 
-  [[nodiscard]] uint8_t const* start() const noexcept;
+  [[nodiscard]] std::shared_ptr<uint8_t const> start() const noexcept;
 
   template <typename T>
-  [[nodiscard]] T const* startAs() const {
-    return slice().startAs<T>();
+  [[nodiscard]] std::shared_ptr<T const> startAs() const {
+    return aliasPtr(slice().startAs<T>());
   }
 
   [[nodiscard]] uint8_t head() const noexcept;
 
-  [[nodiscard]] uint8_t const* begin() noexcept;
+  [[nodiscard]] std::shared_ptr<uint8_t const> begin() const noexcept;
 
-  [[nodiscard]] uint8_t const* begin() const noexcept;
-
-  [[nodiscard]] uint8_t const* end() const;
+  [[nodiscard]] std::shared_ptr<uint8_t const> end() const;
 
   [[nodiscard]] ValueType type() const noexcept;
 
@@ -322,7 +320,7 @@ class SharedSlice {
   [[nodiscard]] SharedSlice alias(Slice slice) const noexcept;
 
   template <typename T>
-  [[nodiscard]] std::shared_ptr<T> aliasT(T* t) const noexcept {
+  [[nodiscard]] std::shared_ptr<T> aliasPtr(T* t) const noexcept {
     return std::shared_ptr<T>(_start, t);
   }
 

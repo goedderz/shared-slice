@@ -27,16 +27,16 @@ using namespace arangodb::velocypack;
 
 Slice SharedSlice::slice() const noexcept { return Slice(_start.get()); }
 
-SharedSlice::SharedSlice(std::shared_ptr<uint8_t const>&& buffer) noexcept
-    : _start(std::move(buffer)) {}
+SharedSlice::SharedSlice(std::shared_ptr<uint8_t const>&& data) noexcept
+    : _start(std::move(data)) {}
 
-SharedSlice::SharedSlice(std::shared_ptr<uint8_t const> const& buffer) noexcept
-    : _start(buffer) {}
+SharedSlice::SharedSlice(std::shared_ptr<uint8_t const> const& data) noexcept
+    : _start(data) {}
 
-SharedSlice::SharedSlice(std::shared_ptr<Buffer<uint8_t const> const>&& buffer) noexcept
+SharedSlice::SharedSlice(std::shared_ptr<Buffer<uint8_t> const>&& buffer) noexcept
     : _start(std::move(buffer), buffer->data()) {}
 
-SharedSlice::SharedSlice(std::shared_ptr<Buffer<uint8_t const> const> const& buffer) noexcept
+SharedSlice::SharedSlice(std::shared_ptr<Buffer<uint8_t> const> const& buffer) noexcept
     : _start(buffer, buffer->data()) {}
 
 SharedSlice::SharedSlice(SharedSlice&& sharedPtr, Slice slice) noexcept
@@ -55,19 +55,17 @@ std::vector<uint64_t> SharedSlice::getTags() const { return slice().getTags(); }
 
 bool SharedSlice::hasTag(uint64_t tagId) const { return slice().hasTag(tagId); }
 
-uint8_t const* SharedSlice::valueStart() const noexcept {
-  return slice().valueStart();
+std::shared_ptr<uint8_t const> SharedSlice::valueStart() const noexcept {
+  return aliasPtr(slice().valueStart());
 }
 
-uint8_t const* SharedSlice::start() const noexcept { return slice().start(); }
+std::shared_ptr<uint8_t const> SharedSlice::start() const noexcept { return aliasPtr(slice().start()); }
 
 uint8_t SharedSlice::head() const noexcept { return slice().head(); }
 
-uint8_t const* SharedSlice::begin() noexcept { return slice().begin(); }
+std::shared_ptr<uint8_t const> SharedSlice::begin() const noexcept { return aliasPtr(slice().begin()); }
 
-uint8_t const* SharedSlice::begin() const noexcept { return slice().begin(); }
-
-uint8_t const* SharedSlice::end() const { return slice().end(); }
+std::shared_ptr<uint8_t const> SharedSlice::end() const { return aliasPtr(slice().end()); }
 
 ValueType SharedSlice::type() const noexcept { return slice().type(); }
 
@@ -222,7 +220,7 @@ bool SharedSlice::hasKey(std::vector<std::string> const& attributes) const {
 }
 
 std::shared_ptr<char const> SharedSlice::getExternal() const {
-  return aliasT(slice().getExternal());
+  return aliasPtr(slice().getExternal());
 }
 
 SharedSlice SharedSlice::resolveExternal() const {
@@ -250,11 +248,11 @@ int64_t SharedSlice::getSmallInt() const { return slice().getSmallInt(); }
 int64_t SharedSlice::getUTCDate() const { return slice().getUTCDate(); }
 
 std::shared_ptr<char const> SharedSlice::getString(ValueLength& length) const {
-  return aliasT(slice().getString(length));
+  return aliasPtr(slice().getString(length));
 }
 
 std::shared_ptr<char const> SharedSlice::getStringUnchecked(ValueLength& length) const noexcept {
-  return aliasT(slice().getStringUnchecked(length));
+  return aliasPtr(slice().getStringUnchecked(length));
 }
 
 ValueLength SharedSlice::getStringLength() const {
@@ -273,7 +271,7 @@ std::string_view SharedSlice::stringView() const {
 #endif
 
 std::shared_ptr<uint8_t const> SharedSlice::getBinary(ValueLength& length) const {
-  return aliasT(slice().getBinary(length));
+  return aliasPtr(slice().getBinary(length));
 }
 
 ValueLength SharedSlice::getBinaryLength() const {
@@ -370,7 +368,7 @@ int64_t SharedSlice::getSmallIntUnchecked() const noexcept {
 
 std::shared_ptr<uint8_t const> SharedSlice::getBCD(int8_t& sign, int32_t& exponent,
                                                    ValueLength& mantissaLength) const {
-  return aliasT(slice().getBCD(sign, exponent, mantissaLength));
+  return aliasPtr(slice().getBCD(sign, exponent, mantissaLength));
 }
 
 SharedSlice SharedSlice::alias(Slice slice) const noexcept {
