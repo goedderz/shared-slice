@@ -1,0 +1,3 @@
+[submodule "velocypack"]
+	path = velocypack
+	url = git@github.com:arangodb/velocypack.git
