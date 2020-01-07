@@ -62,6 +62,9 @@ class SharedSlice {
   explicit SharedSlice(SharedSlice&& sharedPtr, Slice slice) noexcept;
   explicit SharedSlice(SharedSlice const& sharedPtr, Slice slice) noexcept;
 
+  // Default constructor, allocates a new None slice!
+  SharedSlice();
+
   [[nodiscard]] Slice slice() const noexcept;
 
   /**************************************
@@ -193,7 +196,7 @@ class SharedSlice {
 
   template <typename T>
   [[nodiscard]] SharedSlice get(std::vector<T> const& attributes, bool resolveExternals = false) const {
-    return slice().get(attributes, resolveExternals);
+    return alias(slice().get(attributes, resolveExternals));
   }
 
   [[nodiscard]] SharedSlice get(StringRef const& attribute) const;
@@ -297,6 +300,7 @@ class SharedSlice {
 
   [[nodiscard]] bool isEqualStringUnchecked(std::string const& attribute) const noexcept;
 
+  [[nodiscard]] bool binaryEquals(Slice const& other) const;
   [[nodiscard]] bool binaryEquals(SharedSlice const& other) const;
 
   bool operator==(SharedSlice const& other) const = delete;

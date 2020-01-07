@@ -45,6 +45,10 @@ SharedSlice::SharedSlice(SharedSlice&& sharedPtr, Slice slice) noexcept
 SharedSlice::SharedSlice(SharedSlice const& sharedPtr, Slice slice) noexcept
     : _start(sharedPtr._start, slice.start()) {}
 
+SharedSlice::SharedSlice()
+  : _start(Slice::noneSliceData, [](auto){/* don't delete the pointer */}) {
+}
+
 SharedSlice SharedSlice::value() const noexcept {
   return alias(slice().value());
 }
@@ -144,6 +148,8 @@ bool SharedSlice::isCustom() const noexcept { return slice().isCustom(); }
 bool SharedSlice::isTagged() const noexcept { return slice().isTagged(); }
 
 bool SharedSlice::isInteger() const noexcept { return slice().isInteger(); }
+
+bool SharedSlice::isNumber() const noexcept { return slice().isNumber(); }
 
 bool SharedSlice::isSorted() const noexcept { return slice().isSorted(); }
 
@@ -336,6 +342,10 @@ bool SharedSlice::isEqualStringUnchecked(StringRef const& attribute) const noexc
 
 bool SharedSlice::isEqualStringUnchecked(std::string const& attribute) const noexcept {
   return slice().isEqualStringUnchecked(attribute);
+}
+
+bool SharedSlice::binaryEquals(Slice const& other) const {
+  return slice().binaryEquals(other);
 }
 
 bool SharedSlice::binaryEquals(SharedSlice const& other) const {
