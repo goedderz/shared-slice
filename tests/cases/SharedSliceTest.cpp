@@ -79,6 +79,14 @@ void initTestCases(std::vector<Builder>& testCases) {
   }
   {
     auto& builder = testCases.emplace_back();
+    builder.add(Value(42));
+  }
+  {
+    auto& builder = testCases.emplace_back();
+    builder.add(Value(-42));
+  }
+  {
+    auto& builder = testCases.emplace_back();
     builder.openArray();
     builder.add(Value(42));
     builder.close();
@@ -105,6 +113,15 @@ void initTestCases(std::vector<Builder>& testCases) {
     auto& builder = testCases.emplace_back();
     builder.addTagged(42, Value("42"));
   }
+  {
+    auto& builder = testCases.emplace_back();
+    builder.addExternal(Slice::nullSliceData);
+  }
+  // TODO add something using an attributeTranslator
+  // TODO add a UTCDate
+  // TODO add a BCD
+  // TODO add a custom type
+  // TODO add a binary
 }
 
 std::vector<Builder> const& testCases() {
@@ -125,6 +142,16 @@ void forAllTestCases(F f) {
     auto sharedSlice = SharedSlice(builder.buffer());
     // both should point to the exact same data
     ASSERT_EQ(slice.begin(), sharedSlice.slice().begin());
+    using namespace std::string_literals;
+    auto sliceString = [&](){
+      try {
+        return slice.toString();
+      } catch (Exception& e) {
+        return slice.toHex();
+      }
+    }();
+    auto msg = "When testing slice "s + sliceString;
+    SCOPED_TRACE(msg.c_str());
     f(slice, sharedSlice);
   }
 }
@@ -134,6 +161,9 @@ void forAllTestCases(F f) {
  *        executing a callback. Holds either the value the callback returns, or
  *        the velocypack::Exception it throws.
  *        Can then be used to compare the result/exception with another instance.
+ *
+ *        Also allows to compare a Slice with a SharedSlice by comparing the
+ *        data pointers.
  */
 template<typename V>
 class ResultOrException {
@@ -147,7 +177,20 @@ class ResultOrException {
     }
   }
 
-  bool operator==(ResultOrException<V> const& other) const {
+  template<typename W>
+  bool operator==(ResultOrException<W> const& other) const {
+    using LeftType = std::decay_t<decltype(std::get<0>(variant))>;
+    using RightType = std::decay_t<decltype(std::get<0>(other.variant))>;
+    static_assert(std::is_same_v<std::decay_t<V>, LeftType>);
+    static_assert(std::is_same_v<std::decay_t<W>, RightType>);
+    auto constexpr leftIsSlice = std::is_same_v<Slice, LeftType>;
+    auto constexpr rightIsSharedSlice = std::is_same_v<SharedSlice, RightType>;
+    // We only allow comparisons of either equal types V == W, or comparing
+    // a Slice (left) with a SharedSlice (right).
+    static_assert(leftIsSlice == rightIsSharedSlice);
+    auto constexpr comparingSliceWithSharedSlice = leftIsSlice && rightIsSharedSlice;
+    static_assert(std::is_same_v<V, W> || comparingSliceWithSharedSlice);
+
     if (variant.index() != other.variant.index()) {
       return false;
     }
@@ -156,12 +199,38 @@ class ResultOrException {
       case 0: {
         auto const& left = std::get<0>(variant);
         auto const& right = std::get<0>(other.variant);
-        return left == right;
+        if constexpr (comparingSliceWithSharedSlice) {
+          // Compare slices by pointer equality
+          return left.begin() == right.slice().begin();
+        } else {
+          // Compare other values with operator==()
+          return left == right;
+        }
       }
       case 1: {
         auto const& left = std::get<1>(variant);
         auto const& right = std::get<1>(other.variant);
         return left.errorCode() == right.errorCode();
+      }
+      case std::variant_npos:
+        throw std::exception();
+    }
+
+    throw std::exception();
+  }
+
+  // SFINAE out when there is no operator<< vor the value type
+  template<typename W = V, typename = decltype(std::cout << *static_cast<W*>(nullptr))>
+  friend std::ostream& operator<<(std::ostream& out, ResultOrException const& that) {
+    auto const& variant = that.variant;
+    switch(variant.index()) {
+      case 0: {
+        auto const& value = std::get<0>(variant);
+        return out << value;
+      }
+      case 1: {
+        auto const& ex = std::get<1>(variant);
+        return out << ex;
       }
       case std::variant_npos:
         throw std::exception();
@@ -179,7 +248,7 @@ template<typename F> ResultOrException(F) -> ResultOrException<std::invoke_resul
 
 TEST(SharedSliceTest, value) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
-    ASSERT_EQ(slice.value().begin(), sharedSlice.value().slice().begin());
+    ASSERT_EQ(R(slice.value()), R(sharedSlice.value()));
   });
 }
 
@@ -224,523 +293,771 @@ TEST(SharedSliceTest, head) {
     ASSERT_EQ(R(slice.head()), R(sharedSlice.head()));
   });
 }
-// TODO continue writing the following tests
+
 TEST(SharedSliceTest, begin) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.begin()), R(sharedSlice.begin().get()));
   });
 }
 
 TEST(SharedSliceTest, end) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.end()), R(sharedSlice.end().get()));
   });
 }
 
 TEST(SharedSliceTest, type) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.type(), sharedSlice.type());
   });
 }
 
 TEST(SharedSliceTest, typeName) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.typeName(), sharedSlice.typeName());
   });
 }
 
 TEST(SharedSliceTest, hash) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.hash(), sharedSlice.hash());
   });
 }
 
 TEST(SharedSliceTest, hash32) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.hash32(), sharedSlice.hash32());
   });
 }
 
 TEST(SharedSliceTest, hashSlow) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.hashSlow(), sharedSlice.hashSlow());
   });
 }
 
 TEST(SharedSliceTest, normalizedHash) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.normalizedHash(), sharedSlice.normalizedHash());
   });
 }
 
 TEST(SharedSliceTest, normalizedHash32) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.normalizedHash32(), sharedSlice.normalizedHash32());
   });
 }
 
 TEST(SharedSliceTest, hashString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.hashString(), sharedSlice.hashString());
   });
 }
 
 TEST(SharedSliceTest, hashString32) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.hashString32(), sharedSlice.hashString32());
   });
 }
 
 TEST(SharedSliceTest, isType) {
+  auto const types = std::vector<ValueType>{
+      ValueType::None,   ValueType::Illegal,  ValueType::Null,
+      ValueType::Bool,   ValueType::Array,    ValueType::Object,
+      ValueType::Double, ValueType::UTCDate,  ValueType::External,
+      ValueType::MinKey, ValueType::MaxKey,   ValueType::Int,
+      ValueType::UInt,   ValueType::SmallInt, ValueType::String,
+      ValueType::Binary, ValueType::BCD,      ValueType::Custom,
+      ValueType::Tagged};
+
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const type : types) {
+      using namespace std::string_literals;
+      SCOPED_TRACE("When testing type "s + valueTypeName(type));
+      ASSERT_EQ(slice.isType(type), sharedSlice.isType(type));
+    }
   });
 }
 
 TEST(SharedSliceTest, isNone) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isNone(), sharedSlice.isNone());
   });
 }
 
 TEST(SharedSliceTest, isIllegal) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isIllegal(), sharedSlice.isIllegal());
   });
 }
 
 TEST(SharedSliceTest, isNull) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isNull(), sharedSlice.isNull());
   });
 }
 
 TEST(SharedSliceTest, isBool) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isBool(), sharedSlice.isBool());
   });
 }
 
 TEST(SharedSliceTest, isBoolean) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isBoolean(), sharedSlice.isBoolean());
   });
 }
 
 TEST(SharedSliceTest, isTrue) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isTrue(), sharedSlice.isTrue());
   });
 }
 
 TEST(SharedSliceTest, isFalse) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isFalse(), sharedSlice.isFalse());
   });
 }
 
 TEST(SharedSliceTest, isArray) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isArray(), sharedSlice.isArray());
   });
 }
 
 TEST(SharedSliceTest, isObject) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isObject(), sharedSlice.isObject());
   });
 }
 
 TEST(SharedSliceTest, isDouble) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isDouble(), sharedSlice.isDouble());
   });
 }
 
 TEST(SharedSliceTest, isUTCDate) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isUTCDate(), sharedSlice.isUTCDate());
   });
 }
 
 TEST(SharedSliceTest, isExternal) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isExternal(), sharedSlice.isExternal());
   });
 }
 
 TEST(SharedSliceTest, isMinKey) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isMinKey(), sharedSlice.isMinKey());
   });
 }
 
 TEST(SharedSliceTest, isMaxKey) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isMaxKey(), sharedSlice.isMaxKey());
   });
 }
 
 TEST(SharedSliceTest, isInt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isInt(), sharedSlice.isInt());
   });
 }
 
 TEST(SharedSliceTest, isUInt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isUInt(), sharedSlice.isUInt());
   });
 }
 
 TEST(SharedSliceTest, isSmallInt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isSmallInt(), sharedSlice.isSmallInt());
   });
 }
 
 TEST(SharedSliceTest, isString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isString(), sharedSlice.isString());
   });
 }
 
 TEST(SharedSliceTest, isBinary) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isBinary(), sharedSlice.isBinary());
   });
 }
 
 TEST(SharedSliceTest, isBCD) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isBCD(), sharedSlice.isBCD());
   });
 }
 
 TEST(SharedSliceTest, isCustom) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isCustom(), sharedSlice.isCustom());
   });
 }
 
 TEST(SharedSliceTest, isTagged) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isTagged(), sharedSlice.isTagged());
   });
 }
 
 TEST(SharedSliceTest, isInteger) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isInteger(), sharedSlice.isInteger());
   });
 }
 
 TEST(SharedSliceTest, isNumber) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isNumber(), sharedSlice.isNumber());
   });
 }
 
 TEST(SharedSliceTest, isNumberT) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isNumber<uint64_t>(), sharedSlice.isNumber<uint64_t>());
+    ASSERT_EQ(slice.isNumber<int64_t>(), sharedSlice.isNumber<int64_t>());
+    ASSERT_EQ(slice.isNumber<uint8_t>(), sharedSlice.isNumber<uint8_t>());
   });
 }
 
 TEST(SharedSliceTest, isSorted) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(slice.isSorted(), sharedSlice.isSorted());
   });
 }
 
 TEST(SharedSliceTest, getBool) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getBool()), R(sharedSlice.getBool()));
   });
 }
 
 TEST(SharedSliceTest, getBoolean) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getBoolean()), R(sharedSlice.getBoolean()));
   });
 }
 
 TEST(SharedSliceTest, getDouble) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getDouble()), R(sharedSlice.getDouble()));
   });
 }
 
 TEST(SharedSliceTest, at) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.at(0)), R(sharedSlice.at(0)));
+    ASSERT_EQ(R(slice.at(1)), R(sharedSlice.at(1)));
   });
 }
 
 TEST(SharedSliceTest, operatorIndexPValueLength) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.operator[](0)), R(sharedSlice.operator[](0)));
+    ASSERT_EQ(R(slice.operator[](1)), R(sharedSlice.operator[](1)));
   });
 }
 
 TEST(SharedSliceTest, length) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.length()), R(sharedSlice.length()));
   });
 }
 
 TEST(SharedSliceTest, keyAt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.keyAt(0)), R(sharedSlice.keyAt(0)));
+    ASSERT_EQ(R(slice.keyAt(1)), R(sharedSlice.keyAt(1)));
   });
 }
 
 TEST(SharedSliceTest, valueAt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.valueAt(0)), R(sharedSlice.valueAt(0)));
+    ASSERT_EQ(R(slice.valueAt(1)), R(sharedSlice.valueAt(1)));
   });
 }
 
 TEST(SharedSliceTest, getNthValue) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    if (slice.isObject()) { // other types will run into an assertion
+      ASSERT_EQ(R(slice.getNthValue(0)), R(sharedSlice.getNthValue(0)));
+      ASSERT_EQ(R(slice.getNthValue(1)), R(sharedSlice.getNthValue(1)));
+    }
   });
 }
 
 TEST(SharedSliceTest, getPVector) {
+  using namespace std::string_literals;
+  auto paths = std::vector<std::vector<std::string>>{{"foo"s}, {"bar"s}};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& path : paths) {
+      ASSERT_EQ(R(slice.get(path)), R(sharedSlice.get(path)));
+    }
   });
 }
 
 TEST(SharedSliceTest, getPStringRef) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.get(StringRef(attr))), R(sharedSlice.get(StringRef(attr))));
+    }
   });
 }
 
 TEST(SharedSliceTest, getPString) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.get(attr)), R(sharedSlice.get(attr)));
+    }
   });
 }
 
 TEST(SharedSliceTest, getPCharPtr) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.get(attr.c_str())), R(sharedSlice.get(attr.c_str())));
+    }
   });
 }
 
 TEST(SharedSliceTest, getPCharPtrLen) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.get(attr.c_str(), attr.length())), R(sharedSlice.get(attr.c_str(), attr.length())));
+    }
   });
 }
 
 TEST(SharedSliceTest, operatorIndexPStringRef) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.operator[](StringRef(attr))), R(sharedSlice.operator[](StringRef(attr))));
+    }
   });
 }
 
 TEST(SharedSliceTest, operatorIndexPString) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.operator[](attr)), R(sharedSlice.operator[](attr)));
+    }
   });
 }
 
 TEST(SharedSliceTest, hasKeyPStringRef) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.hasKey(StringRef(attr))), R(sharedSlice.hasKey(StringRef(attr))));
+    }
   });
 }
 
 TEST(SharedSliceTest, hasKeyPString) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.hasKey(attr)), R(sharedSlice.hasKey(attr)));
+    }
   });
 }
 
 TEST(SharedSliceTest, hasKeyPCharPtr) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.hasKey(attr.c_str())), R(sharedSlice.hasKey(attr.c_str())));
+    }
   });
 }
 
 TEST(SharedSliceTest, hasKeyPCharPtrLen) {
+  using namespace std::string_literals;
+  auto attrs = std::vector<std::string>{"foo"s, "bar"s};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& attr : attrs) {
+      ASSERT_EQ(R(slice.hasKey(attr.c_str(), attr.length())), R(sharedSlice.hasKey(attr.c_str(), attr.length())));
+    }
   });
 }
 
 TEST(SharedSliceTest, hasKeyPVector) {
+  using namespace std::string_literals;
+  auto paths = std::vector<std::vector<std::string>>{{"foo"s}, {"bar"s}};
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    for (auto const& path : paths) {
+      ASSERT_EQ(R(slice.hasKey(path)), R(sharedSlice.hasKey(path)));
+    }
   });
 }
 
 TEST(SharedSliceTest, getExternal) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getExternal()), R(sharedSlice.getExternal().get()));
   });
 }
 
 TEST(SharedSliceTest, resolveExternal) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.resolveExternal()), R(sharedSlice.resolveExternal()));
   });
 }
 
 TEST(SharedSliceTest, resolveExternals) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.resolveExternals()), R(sharedSlice.resolveExternals()));
   });
 }
 
 TEST(SharedSliceTest, isEmptyArray) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.isEmptyArray()), R(sharedSlice.isEmptyArray()));
   });
 }
 
 TEST(SharedSliceTest, isEmptyObject) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.isEmptyObject()), R(sharedSlice.isEmptyObject()));
   });
 }
 
 TEST(SharedSliceTest, translate) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.translate()), R(sharedSlice.translate()));
   });
 }
 
 TEST(SharedSliceTest, getInt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getInt()), R(sharedSlice.getInt()));
   });
 }
 
 TEST(SharedSliceTest, getUInt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getUInt()), R(sharedSlice.getUInt()));
   });
 }
 
 TEST(SharedSliceTest, getSmallInt) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getSmallInt()), R(sharedSlice.getSmallInt()));
   });
 }
 
 TEST(SharedSliceTest, getNumber) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getNumber<uint64_t>()), R(sharedSlice.getNumber<uint64_t>()));
+    ASSERT_EQ(R(slice.getNumber<int64_t>()), R(sharedSlice.getNumber<int64_t>()));
+    ASSERT_EQ(R(slice.getNumber<uint8_t>()), R(sharedSlice.getNumber<uint8_t>()));
   });
 }
 
 TEST(SharedSliceTest, getNumericValue) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getNumericValue<uint64_t>()), R(sharedSlice.getNumericValue<uint64_t>()));
+    ASSERT_EQ(R(slice.getNumericValue<int64_t>()), R(sharedSlice.getNumericValue<int64_t>()));
+    ASSERT_EQ(R(slice.getNumericValue<uint8_t>()), R(sharedSlice.getNumericValue<uint8_t>()));
   });
 }
 
 TEST(SharedSliceTest, getUTCDate) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getUTCDate()), R(sharedSlice.getUTCDate()));
   });
 }
 
 TEST(SharedSliceTest, getString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ValueLength left;
+    ValueLength right;
+    ASSERT_EQ(R(slice.getString(left)), R(sharedSlice.getString(right).get()));
+    ASSERT_EQ(left, right);
   });
 }
 
 TEST(SharedSliceTest, getStringUnchecked) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    if (slice.isString()) {
+      ValueLength left;
+      ValueLength right;
+      ASSERT_EQ(R(slice.getStringUnchecked(left)),
+                R(sharedSlice.getStringUnchecked(right).get()));
+      ASSERT_EQ(left, right);
+    }
   });
 }
 
 TEST(SharedSliceTest, getStringLength) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getStringLength()), R(sharedSlice.getStringLength()));
   });
 }
 
 TEST(SharedSliceTest, copyString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.copyString()), R(sharedSlice.copyString()));
   });
 }
 
 TEST(SharedSliceTest, stringRef) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.stringRef()), R(sharedSlice.stringRef()));
   });
 }
 
+#ifdef VELOCYPACK_HAS_STRING_VIEW
 TEST(SharedSliceTest, stringView) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.stringView()), R(sharedSlice.stringView()));
   });
 }
+#endif
 
 TEST(SharedSliceTest, getBinary) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ValueLength left;
+    ValueLength right;
+    ASSERT_EQ(R(slice.getBinary(left)), R(sharedSlice.getBinary(right).get()));
+    ASSERT_EQ(left, right);
   });
 }
 
 TEST(SharedSliceTest, getBinaryLength) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.getBinaryLength()), R(sharedSlice.getBinaryLength()));
   });
 }
 
 TEST(SharedSliceTest, copyBinary) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.copyBinary()), R(sharedSlice.copyBinary()));
   });
 }
 
 TEST(SharedSliceTest, byteSize) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.byteSize()), R(sharedSlice.byteSize()));
   });
 }
 
 TEST(SharedSliceTest, valueByteSize) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.valueByteSize()), R(sharedSlice.valueByteSize()));
   });
 }
 
 TEST(SharedSliceTest, findDataOffset) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    // array
+    ASSERT_EQ(R(slice.findDataOffset(0x06)), R(sharedSlice.findDataOffset(0x06)));
+    // object
+    ASSERT_EQ(R(slice.findDataOffset(0x0b)), R(sharedSlice.findDataOffset(0x0b)));
   });
 }
 
 TEST(SharedSliceTest, getNthOffset) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    if (slice.isArray() || slice.isObject()) { // avoid assertion
+      ASSERT_EQ(R(slice.getNthOffset(0)), R(sharedSlice.getNthOffset(0)));
+      ASSERT_EQ(R(slice.getNthOffset(1)), R(sharedSlice.getNthOffset(1)));
+    }
   });
 }
 
 TEST(SharedSliceTest, makeKey) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.makeKey()), R(sharedSlice.makeKey()));
   });
 }
 
 TEST(SharedSliceTest, compareStringPStringRef) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.compareString(StringRef("42"))), R(sharedSlice.compareString(StringRef("42"))));
+    ASSERT_EQ(R(slice.compareString(StringRef("foo"))), R(sharedSlice.compareString(StringRef("foo"))));
+    ASSERT_EQ(R(slice.compareString(StringRef("bar"))), R(sharedSlice.compareString(StringRef("bar"))));
   });
 }
 
 TEST(SharedSliceTest, compareStringPString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    using namespace std::string_literals;
+    ASSERT_EQ(R(slice.compareString("42"s)), R(sharedSlice.compareString("42"s)));
+    ASSERT_EQ(R(slice.compareString("foo"s)), R(sharedSlice.compareString("foo"s)));
+    ASSERT_EQ(R(slice.compareString("bar"s)), R(sharedSlice.compareString("bar"s)));
   });
 }
 
 TEST(SharedSliceTest, compareStringPCharPtrLen) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.compareString("42", 2)), R(sharedSlice.compareString("42", 2)));
+    ASSERT_EQ(R(slice.compareString("foo", 3)), R(sharedSlice.compareString("foo", 3)));
+    ASSERT_EQ(R(slice.compareString("bar", 3)), R(sharedSlice.compareString("bar", 3)));
   });
 }
 
 TEST(SharedSliceTest, compareStringUncheckedPStringRef) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.compareStringUnchecked(StringRef("42"))), R(sharedSlice.compareStringUnchecked(StringRef("42"))));
+    ASSERT_EQ(R(slice.compareStringUnchecked(StringRef("foo"))), R(sharedSlice.compareStringUnchecked(StringRef("foo"))));
+    ASSERT_EQ(R(slice.compareStringUnchecked(StringRef("bar"))), R(sharedSlice.compareStringUnchecked(StringRef("bar"))));
   });
 }
 
 TEST(SharedSliceTest, compareStringUncheckedPString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    using namespace std::string_literals;
+    ASSERT_EQ(R(slice.compareStringUnchecked("42"s)), R(sharedSlice.compareStringUnchecked("42"s)));
+    ASSERT_EQ(R(slice.compareStringUnchecked("foo"s)), R(sharedSlice.compareStringUnchecked("foo"s)));
+    ASSERT_EQ(R(slice.compareStringUnchecked("bar"s)), R(sharedSlice.compareStringUnchecked("bar"s)));
   });
 }
 
 TEST(SharedSliceTest, compareStringUncheckedPCharPtrLen) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.compareStringUnchecked("42", 2)), R(sharedSlice.compareStringUnchecked("42", 2)));
+    ASSERT_EQ(R(slice.compareStringUnchecked("foo", 3)), R(sharedSlice.compareStringUnchecked("foo", 3)));
+    ASSERT_EQ(R(slice.compareStringUnchecked("bar", 3)), R(sharedSlice.compareStringUnchecked("bar", 3)));
   });
 }
 
 TEST(SharedSliceTest, isEqualStringPStringRef) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.isEqualString(StringRef("42"))), R(sharedSlice.isEqualString(StringRef("42"))));
+    ASSERT_EQ(R(slice.isEqualString(StringRef("foo"))), R(sharedSlice.isEqualString(StringRef("foo"))));
+    ASSERT_EQ(R(slice.isEqualString(StringRef("bar"))), R(sharedSlice.isEqualString(StringRef("bar"))));
   });
 }
 
 TEST(SharedSliceTest, isEqualStringPString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    using namespace std::string_literals;
+    ASSERT_EQ(R(slice.isEqualString("42"s)), R(sharedSlice.isEqualString("42"s)));
+    ASSERT_EQ(R(slice.isEqualString("foo"s)), R(sharedSlice.isEqualString("foo"s)));
+    ASSERT_EQ(R(slice.isEqualString("bar"s)), R(sharedSlice.isEqualString("bar"s)));
   });
 }
 
 TEST(SharedSliceTest, isEqualStringUncheckedPStringRef) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.isEqualStringUnchecked(StringRef("42"))), R(sharedSlice.isEqualStringUnchecked(StringRef("42"))));
+    ASSERT_EQ(R(slice.isEqualStringUnchecked(StringRef("foo"))), R(sharedSlice.isEqualStringUnchecked(StringRef("foo"))));
+    ASSERT_EQ(R(slice.isEqualStringUnchecked(StringRef("bar"))), R(sharedSlice.isEqualStringUnchecked(StringRef("bar"))));
   });
 }
 
 TEST(SharedSliceTest, isEqualStringUncheckedPString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    using namespace std::string_literals;
+    ASSERT_EQ(R(slice.isEqualStringUnchecked("42"s)), R(sharedSlice.isEqualStringUnchecked("42"s)));
+    ASSERT_EQ(R(slice.isEqualStringUnchecked("foo"s)), R(sharedSlice.isEqualStringUnchecked("foo"s)));
+    ASSERT_EQ(R(slice.isEqualStringUnchecked("bar"s)), R(sharedSlice.isEqualStringUnchecked("bar"s)));
   });
 }
 
 TEST(SharedSliceTest, binaryEquals) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.binaryEquals(slice)), R(sharedSlice.binaryEquals(slice)));
+    ASSERT_EQ(R(slice.binaryEquals(slice)), R(sharedSlice.binaryEquals(sharedSlice)));
+    ASSERT_EQ(R(slice.binaryEquals(sharedSlice.slice())), R(sharedSlice.binaryEquals(slice)));
+    ASSERT_EQ(R(slice.binaryEquals(sharedSlice.slice())), R(sharedSlice.binaryEquals(sharedSlice)));
   });
 }
 
 TEST(SharedSliceTest, toHex) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.toHex()), R(sharedSlice.toHex()));
   });
 }
 
 TEST(SharedSliceTest, toJson) {
+  auto const pretty = [](){
+    auto opts = Options{};
+    opts.prettyPrint = true;
+    return opts;
+  }();
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.toJson()), R(sharedSlice.toJson()));
+    ASSERT_EQ(R(slice.toJson(&pretty)), R(sharedSlice.toJson(&pretty)));
   });
 }
 
 TEST(SharedSliceTest, toString) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.toString()), R(sharedSlice.toString()));
+    // TODO add a check with an options argument, that actually results in a
+    // different return value for some input test case.
   });
 }
 
 TEST(SharedSliceTest, hexType) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    ASSERT_EQ(R(slice.hexType()), R(sharedSlice.hexType()));
   });
 }
 
 TEST(SharedSliceTest, getIntUnchecked) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    if (slice.isInteger()) {
+      ASSERT_EQ(R(slice.getIntUnchecked()), R(sharedSlice.getIntUnchecked()));
+    }
   });
 }
 
 TEST(SharedSliceTest, getUIntUnchecked) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    if (slice.isUInt()) {
+      ASSERT_EQ(R(slice.getUIntUnchecked()), R(sharedSlice.getUIntUnchecked()));
+    }
   });
 }
 
 TEST(SharedSliceTest, getSmallIntUnchecked) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    if (slice.isInteger()) {
+      ASSERT_EQ(R(slice.getSmallIntUnchecked()), R(sharedSlice.getSmallIntUnchecked()));
+    }
   });
 }
 
 TEST(SharedSliceTest, getBCD) {
   forAllTestCases([&](Slice slice, SharedSlice sharedSlice) {
+    int8_t leftSign;
+    int8_t rightSign;
+    int32_t leftExponent;
+    int32_t rightExponent;
+    ValueLength leftMantissaLength;
+    ValueLength rightMantissaLength;
+    ASSERT_EQ(R(slice.getBCD(leftSign, leftExponent, leftMantissaLength)), R(sharedSlice.getBCD(rightSign, rightExponent, rightMantissaLength).get()));
+    ASSERT_EQ(leftSign, rightSign);
+    ASSERT_EQ(leftExponent, rightExponent);
+    ASSERT_EQ(leftMantissaLength, rightMantissaLength);
   });
 }
