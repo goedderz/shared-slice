@@ -65,6 +65,10 @@ class SharedSlice {
   // Default constructor, allocates a new None slice!
   SharedSlice();
 
+  // Accessor of the SharedSlice's buffer
+  [[nodiscard]] std::shared_ptr<uint8_t const> const& buffer() const noexcept { return _start; }
+
+  // Access the buffer as a Slice
   [[nodiscard]] Slice slice() const noexcept;
 
   /**************************************

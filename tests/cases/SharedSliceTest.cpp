@@ -200,8 +200,8 @@ class ResultOrException {
         auto const& left = std::get<0>(variant);
         auto const& right = std::get<0>(other.variant);
         if constexpr (comparingSliceWithSharedSlice) {
-          // Compare slices by pointer equality
-          return left.begin() == right.slice().begin();
+          // Compare slice with shared slice by pointer equality
+          return left.start() == right.buffer().get();
         } else {
           // Compare other values with operator==()
           return left == right;
