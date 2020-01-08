@@ -159,7 +159,8 @@ forAllTestCases(F f) {
   }
 }
 
-// Iterates over all testcases. Takes a callback `F(SharedSlice&&)`.
+// Iterates over all testcases. Takes a callback `F(SharedSlice&&)`
+// (or `F(SharedSlice)`, the slice will be moved).
 // Used for refcount tests, so the SharedSlice will be the only owner of its
 // buffer.
 template<typename F>
@@ -1100,11 +1101,15 @@ TEST(SharedSliceAgainstSliceTest, getBCD) {
 }
 
 namespace {
-auto owner_less = std::owner_less<std::shared_ptr<uint8_t const>>{};
+template<typename T, typename U>
+bool haveSameOwnership(std::shared_ptr<T> const& left, std::shared_ptr<U> const& right) {
+  static thread_local auto owner_less = std::owner_less<std::shared_ptr<uint8_t const>>{};
+  return !owner_less(left, right) && !owner_less(right, left);
+}
 bool haveSameOwnership(SharedSlice const& leftSlice, SharedSlice const& rightSlice) {
   auto const& left = leftSlice.buffer();
   auto const& right = rightSlice.buffer();
-  return !owner_less(left, right) && !owner_less(right, left);
+  return haveSameOwnership(left, right);
 }
 }
 
@@ -1216,5 +1221,119 @@ TEST(SharedSliceRefcountTest, destructor) {
       ASSERT_EQ(1, weakPtr.use_count());
     }
     ASSERT_EQ(0, weakPtr.use_count());
+  });
+}
+
+TEST(SharedSliceRefcountTest, valueStart) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+    auto result = sharedSlice.valueStart();
+    ASSERT_EQ(2, sharedSlice.buffer().use_count());
+    ASSERT_EQ(2, result.use_count());
+    ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+  });
+}
+
+TEST(SharedSliceRefcountTest, start) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+    auto result = sharedSlice.start();
+    ASSERT_EQ(2, sharedSlice.buffer().use_count());
+    ASSERT_EQ(2, result.use_count());
+    ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+  });
+}
+
+TEST(SharedSliceRefcountTest, startAs) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+    auto result = sharedSlice.startAs<void*>();
+    ASSERT_EQ(2, sharedSlice.buffer().use_count());
+    ASSERT_EQ(2, result.use_count());
+    ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+  });
+}
+
+TEST(SharedSliceRefcountTest, begin) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+    auto result = sharedSlice.begin();
+    ASSERT_EQ(2, sharedSlice.buffer().use_count());
+    ASSERT_EQ(2, result.use_count());
+    ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+  });
+}
+
+TEST(SharedSliceRefcountTest, end) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+    auto result = sharedSlice.end();
+    ASSERT_EQ(2, sharedSlice.buffer().use_count());
+    ASSERT_EQ(2, result.use_count());
+    ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+  });
+}
+
+TEST(SharedSliceRefcountTest, getExternal) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+    auto result = sharedSlice.getExternal();
+    ASSERT_EQ(2, sharedSlice.buffer().use_count());
+    ASSERT_EQ(2, result.use_count());
+    ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+  });
+}
+
+TEST(SharedSliceRefcountTest, getString) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    if (sharedSlice.isString()) {
+      ASSERT_EQ(1, sharedSlice.buffer().use_count());
+      ValueLength length;
+      auto result = sharedSlice.getString(length);
+      ASSERT_EQ(2, sharedSlice.buffer().use_count());
+      ASSERT_EQ(2, result.use_count());
+      ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+    }
+  });
+}
+
+TEST(SharedSliceRefcountTest, getStringUnchecked) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    if (sharedSlice.isString()) {
+      ASSERT_EQ(1, sharedSlice.buffer().use_count());
+      ValueLength length;
+      auto result = sharedSlice.getStringUnchecked(length);
+      ASSERT_EQ(2, sharedSlice.buffer().use_count());
+      ASSERT_EQ(2, result.use_count());
+      ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+    }
+  });
+}
+
+TEST(SharedSliceRefcountTest, getBinary) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    if (sharedSlice.isBinary()) {
+      ASSERT_EQ(1, sharedSlice.buffer().use_count());
+      ValueLength length;
+      auto result = sharedSlice.getBinary(length);
+      ASSERT_EQ(2, sharedSlice.buffer().use_count());
+      ASSERT_EQ(2, result.use_count());
+      ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+    }
+  });
+}
+
+TEST(SharedSliceRefcountTest, getBCD) {
+  forAllTestCases([&](SharedSlice sharedSlice) {
+    if (sharedSlice.isBCD()) {
+      ASSERT_EQ(1, sharedSlice.buffer().use_count());
+      int8_t sign;
+      int32_t exponent;
+      ValueLength mantissaLength;
+      auto result = sharedSlice.getBCD(sign, exponent, mantissaLength);
+      ASSERT_EQ(2, sharedSlice.buffer().use_count());
+      ASSERT_EQ(2, result.use_count());
+      ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+    }
   });
 }
