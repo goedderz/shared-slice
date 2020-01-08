@@ -30,27 +30,6 @@
 
 namespace arangodb::velocypack {
 
-/*
- * TODO Design questions:
- *
- * What's the underlying type? e.g.
- * std::shared_ptr<uint8_t const> or
- * std::shared_ptr<Buffer<uint8_t>> or
- * std::shared_ptr<Slice>
- * or something else?
- *
- * Which methods should return shared_ptr aside from the ones returning Slices?
- * e.g. getExternal(), getString() etc.
- *
- * Should really everything be delegated, or only those methods returning
- * a SharedSlice / shared_ptr?
- * The rest could be called by using slice().[method], too. Or we could even
- * add operator->, so sharedSlice->[method] will always call the method on the
- * slice.
- *
- * Should we pass template arguments to shared_ptr, i.e. Deleter and Allocator?
- */
-
 class SharedSlice {
  public:
   explicit SharedSlice(std::shared_ptr<uint8_t const>&& data) noexcept;
