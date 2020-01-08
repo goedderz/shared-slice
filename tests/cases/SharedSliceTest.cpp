@@ -1102,10 +1102,10 @@ TEST(SharedSliceAgainstSliceTest, getBCD) {
 
 namespace {
 template<typename T, typename U>
-// TODO fix for different shared_ptr types
 bool haveSameOwnership(std::shared_ptr<T> const& left, std::shared_ptr<U> const& right) {
-  static thread_local auto owner_less = std::owner_less<std::shared_ptr<uint8_t const>>{};
-  return !owner_less(left, right) && !owner_less(right, left);
+  using cmp_ptr_type = std::shared_ptr<void const>;
+  static thread_local auto owner_less = std::owner_less<cmp_ptr_type>{};
+  return !owner_less(cmp_ptr_type(left), cmp_ptr_type(right)) && !owner_less(cmp_ptr_type(right), cmp_ptr_type(left));
 }
 bool haveSameOwnership(SharedSlice const& leftSlice, SharedSlice const& rightSlice) {
   auto const& left = leftSlice.buffer();
