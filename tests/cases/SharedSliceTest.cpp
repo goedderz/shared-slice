@@ -220,7 +220,7 @@ class ResultOrException {
   }
 
   // SFINAE out when there is no operator<< for the value type
-  template<typename W = V, typename = decltype(std::cout << *static_cast<W*>(nullptr))>
+  template<typename W = V, typename = decltype(operator<<(*static_cast<std::ostream*>(nullptr), *static_cast<W*>(nullptr)))>
   friend std::ostream& operator<<(std::ostream& out, ResultOrException const& that) {
     auto const& variant = that.variant;
     switch(variant.index()) {
@@ -799,7 +799,10 @@ TEST(SharedSliceAgainstSliceTest, getString) {
     ValueLength left;
     ValueLength right;
     ASSERT_EQ(R(slice.getString(left)), R(sharedSlice.getString(right).get()));
-    ASSERT_EQ(left, right);
+    // The argument is only set when getString is successful
+    if (slice.isString()) {
+      ASSERT_EQ(left, right);
+    }
   });
 }
 
@@ -846,7 +849,10 @@ TEST(SharedSliceAgainstSliceTest, getBinary) {
     ValueLength left;
     ValueLength right;
     ASSERT_EQ(R(slice.getBinary(left)), R(sharedSlice.getBinary(right).get()));
-    ASSERT_EQ(left, right);
+    // The argument is only set when getBinary is successful
+    if (slice.isBinary()) {
+      ASSERT_EQ(left, right);
+    }
   });
 }
 
@@ -1056,8 +1062,11 @@ TEST(SharedSliceAgainstSliceTest, getBCD) {
     ValueLength leftMantissaLength;
     ValueLength rightMantissaLength;
     ASSERT_EQ(R(slice.getBCD(leftSign, leftExponent, leftMantissaLength)), R(sharedSlice.getBCD(rightSign, rightExponent, rightMantissaLength).get()));
-    ASSERT_EQ(leftSign, rightSign);
-    ASSERT_EQ(leftExponent, rightExponent);
-    ASSERT_EQ(leftMantissaLength, rightMantissaLength);
+    // The arguments are only set when getBCD is successful
+    if (slice.isBCD()) {
+      ASSERT_EQ(leftSign, rightSign);
+      ASSERT_EQ(leftExponent, rightExponent);
+      ASSERT_EQ(leftMantissaLength, rightMantissaLength);
+    }
   });
 }
