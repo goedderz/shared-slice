@@ -1277,11 +1277,13 @@ TEST(SharedSliceRefcountTest, end) {
 
 TEST(SharedSliceRefcountTest, getExternal) {
   forAllTestCases([&](SharedSlice sharedSlice) {
-    ASSERT_EQ(1, sharedSlice.buffer().use_count());
-    auto result = sharedSlice.getExternal();
-    ASSERT_EQ(2, sharedSlice.buffer().use_count());
-    ASSERT_EQ(2, result.use_count());
-    ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+    if (sharedSlice.isExternal()) {
+      ASSERT_EQ(1, sharedSlice.buffer().use_count());
+      auto result = sharedSlice.getExternal();
+      ASSERT_EQ(2, sharedSlice.buffer().use_count());
+      ASSERT_EQ(2, result.use_count());
+      ASSERT_TRUE(haveSameOwnership(sharedSlice.buffer(), result));
+    }
   });
 }
 
