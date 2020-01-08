@@ -62,8 +62,15 @@ class SharedSlice {
   explicit SharedSlice(SharedSlice&& sharedPtr, Slice slice) noexcept;
   explicit SharedSlice(SharedSlice const& sharedPtr, Slice slice) noexcept;
 
-  // Default constructor, allocates a new None slice!
-  SharedSlice();
+  // Default constructor, points to a (static) None slice
+  SharedSlice() noexcept;
+
+  // Copy & move constructor & assignment
+  SharedSlice(SharedSlice const&) = default;
+  SharedSlice(SharedSlice&&) noexcept;
+  SharedSlice& operator=(SharedSlice const&) = default;
+  SharedSlice& operator=(SharedSlice&&) noexcept;
+  ~SharedSlice() = default;
 
   // Accessor of the SharedSlice's buffer
   [[nodiscard]] std::shared_ptr<uint8_t const> const& buffer() const noexcept { return _start; }

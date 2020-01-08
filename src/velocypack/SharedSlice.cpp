@@ -25,6 +25,11 @@
 using namespace arangodb;
 using namespace arangodb::velocypack;
 
+namespace {
+std::shared_ptr<uint8_t const> staticSharedNoneBuffer{Slice::noneSliceData,
+                                                      [](auto) { /* don't delete the pointer */ }};
+}
+
 Slice SharedSlice::slice() const noexcept { return Slice(_start.get()); }
 
 SharedSlice::SharedSlice(std::shared_ptr<uint8_t const>&& data) noexcept
@@ -45,9 +50,7 @@ SharedSlice::SharedSlice(SharedSlice&& sharedPtr, Slice slice) noexcept
 SharedSlice::SharedSlice(SharedSlice const& sharedPtr, Slice slice) noexcept
     : _start(sharedPtr._start, slice.start()) {}
 
-SharedSlice::SharedSlice()
-  : _start(Slice::noneSliceData, [](auto){/* don't delete the pointer */}) {
-}
+SharedSlice::SharedSlice() noexcept : _start(staticSharedNoneBuffer) {}
 
 SharedSlice SharedSlice::value() const noexcept {
   return alias(slice().value());
@@ -383,4 +386,17 @@ std::shared_ptr<uint8_t const> SharedSlice::getBCD(int8_t& sign, int32_t& expone
 
 SharedSlice SharedSlice::alias(Slice slice) const noexcept {
   return SharedSlice(*this, slice);
+}
+
+SharedSlice::SharedSlice(SharedSlice&& other) noexcept {
+  _start = std::move(other._start);
+  // Set other to point to None
+  other._start = staticSharedNoneBuffer;
+}
+
+SharedSlice& SharedSlice::operator=(SharedSlice&& other) noexcept {
+  _start = std::move(other._start);
+  // Set other to point to None
+  other._start = staticSharedNoneBuffer;
+  return *this;
 }
