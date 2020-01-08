@@ -27,6 +27,7 @@
 #include <velocypack/Builder.h>
 #include <velocypack/Slice.h>
 
+#include <memory>
 #include <variant>
 
 using namespace arangodb;
@@ -134,8 +135,10 @@ std::vector<Builder> const& testCases() {
   return _testCases;
 }
 
+// Iterates over all testcases. Takes a callback `F(Slice, SharedSlice)`.
 template<typename F>
-void forAllTestCases(F f) {
+std::enable_if_t<std::is_invocable<F, Slice, SharedSlice>::value>
+forAllTestCases(F f) {
   for (auto const& builder : testCases()) {
     ASSERT_TRUE(builder.isClosed());
     auto slice = builder.slice();
@@ -153,6 +156,31 @@ void forAllTestCases(F f) {
     auto msg = "When testing slice "s + sliceString;
     SCOPED_TRACE(msg.c_str());
     f(slice, sharedSlice);
+  }
+}
+
+// Iterates over all testcases. Takes a callback `F(SharedSlice&&)`.
+// Used for refcount tests, so the SharedSlice will be the only owner of its
+// buffer.
+template<typename F>
+std::enable_if_t<std::is_invocable<F, SharedSlice&&>::value>
+forAllTestCases(F f) {
+  for (auto const& builder : testCases()) {
+    ASSERT_TRUE(builder.isClosed());
+    // Copy the buffer, so the SharedSlice is the only owner of its buffer.
+    auto sharedSlice = SharedSlice{std::make_shared<Buffer<uint8_t>>(*builder.buffer())};
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+    using namespace std::string_literals;
+    auto sliceString = [&]() {
+      try {
+        return sharedSlice.toString();
+      } catch (Exception& e) {
+        return sharedSlice.toHex();
+      }
+    }();
+    auto msg = "When testing slice "s + sliceString;
+    SCOPED_TRACE(msg.c_str());
+    f(std::move(sharedSlice));
   }
 }
 
@@ -1068,5 +1096,125 @@ TEST(SharedSliceAgainstSliceTest, getBCD) {
       ASSERT_EQ(leftExponent, rightExponent);
       ASSERT_EQ(leftMantissaLength, rightMantissaLength);
     }
+  });
+}
+
+namespace {
+auto owner_less = std::owner_less<std::shared_ptr<uint8_t const>>{};
+bool haveSameOwnership(SharedSlice const& leftSlice, SharedSlice const& rightSlice) {
+  auto const& left = leftSlice.buffer();
+  auto const& right = rightSlice.buffer();
+  return !owner_less(left, right) && !owner_less(right, left);
+}
+}
+
+TEST(SharedSliceRefcountTest, copyConstructor) {
+  forAllTestCases([&](SharedSlice&& sharedSliceRef) {
+    // We assume to be the only owner of the referenced buffer
+    ASSERT_EQ(1, sharedSliceRef.buffer().use_count());
+
+    // Execute copy constructor
+    SharedSlice sharedSlice{sharedSliceRef};
+
+    // Use count for both should be two
+    ASSERT_GE(2, sharedSliceRef.buffer().use_count());
+    ASSERT_GE(2, sharedSlice.buffer().use_count());
+
+    // Both should share ownership
+    ASSERT_TRUE(haveSameOwnership(sharedSliceRef, sharedSlice));
+
+    // Both should share the same buffer
+    ASSERT_EQ(sharedSliceRef.buffer(), sharedSlice.buffer());
+  });
+}
+
+
+TEST(SharedSliceRefcountTest, copyAssignment) {
+  SharedSlice sharedSlice;
+  forAllTestCases([&](SharedSlice&& sharedSliceRef) {
+    // We assume to be the only owner of the referenced buffer
+    ASSERT_EQ(1, sharedSliceRef.buffer().use_count());
+
+    // Execute copy assignment
+    sharedSlice = sharedSliceRef;
+
+    // Use count for both should be two
+    ASSERT_GE(2, sharedSliceRef.buffer().use_count());
+    ASSERT_GE(2, sharedSlice.buffer().use_count());
+
+    // Both should share ownership
+    ASSERT_TRUE(haveSameOwnership(sharedSliceRef, sharedSlice));
+
+    // Both should share the same buffer
+    ASSERT_EQ(sharedSliceRef.buffer(), sharedSlice.buffer());
+  });
+}
+
+TEST(SharedSliceRefcountTest, moveConstructor) {
+  forAllTestCases([&](SharedSlice&& sharedSliceRef) {
+    // We assume to be the only owner of the referenced buffer
+    ASSERT_EQ(1, sharedSliceRef.buffer().use_count());
+    auto const origPointer = sharedSliceRef.buffer().get();
+
+    // Execute move constructor
+    SharedSlice sharedSlice{std::move(sharedSliceRef)};
+
+    // The passed slice should now point to a valid None slice
+    ASSERT_LE(1, sharedSliceRef.buffer().use_count()); // NOLINT(bugprone-use-after-move,hicpp-invalid-access-moved)
+    ASSERT_TRUE(sharedSliceRef.isNone());
+    // The underlying buffers should be different
+    ASSERT_NE(sharedSliceRef.buffer(), sharedSlice.buffer());
+
+    // The slices should not share ownership
+    ASSERT_FALSE(haveSameOwnership(sharedSliceRef, sharedSlice));
+
+    // The local sharedSlice should be the only owner of its buffer
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+
+    // sharedSlice should point to the same buffer as the sharedSliceRef did
+    // originally
+    ASSERT_EQ(origPointer, sharedSlice.buffer().get());
+  });
+}
+
+TEST(SharedSliceRefcountTest, moveAssignment) {
+  SharedSlice sharedSlice;
+  forAllTestCases([&](SharedSlice&& sharedSliceRef) {
+    // We assume to be the only owner of the referenced buffer
+    ASSERT_EQ(1, sharedSliceRef.buffer().use_count());
+    auto const origPointer = sharedSliceRef.buffer().get();
+
+    // Execute move assignment
+    sharedSlice = std::move(sharedSliceRef);
+
+    // The passed slice should now point to a valid None slice
+    ASSERT_LE(1, sharedSliceRef.buffer().use_count()); // NOLINT(bugprone-use-after-move,hicpp-invalid-access-moved)
+    ASSERT_TRUE(sharedSliceRef.isNone());
+    // The underlying buffers should be different
+    ASSERT_NE(sharedSliceRef.buffer(), sharedSlice.buffer());
+
+    // The slices should not share ownership
+    ASSERT_FALSE(haveSameOwnership(sharedSliceRef, sharedSlice));
+
+    // The local sharedSlice should be the only owner of its buffer
+    ASSERT_EQ(1, sharedSlice.buffer().use_count());
+
+    // sharedSlice should point to the same buffer as the sharedSliceRef did
+    // originally
+    ASSERT_EQ(origPointer, sharedSlice.buffer().get());
+  });
+}
+
+TEST(SharedSliceRefcountTest, destructor) {
+  forAllTestCases([&](SharedSlice&& sharedSliceRef) {
+    std::weak_ptr<uint8_t const> weakPtr;
+    {
+      SharedSlice sharedSlice{std::move(sharedSliceRef)};
+      // We assume to be the only owner of the referenced buffer
+      ASSERT_EQ(1, sharedSlice.buffer().use_count());
+      weakPtr = decltype(weakPtr)(sharedSlice.buffer());
+      ASSERT_EQ(1, weakPtr.use_count());
+    }
+    ASSERT_EQ(0, weakPtr.use_count());
   });
 }
